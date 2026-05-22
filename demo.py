@@ -7,7 +7,7 @@ import argparse
 import sys
 from flip7.engine.cards import NumberCard, ModifierCard, ActionCard, ModifierOp, ActionType
 from flip7.engine.state import GameState, PlayerStatus, HitStay
-from flip7.engine.game import GameEngine
+from flip7.engine.game import GameEngine, WIN_SCORE
 from flip7.players.base import BasePlayer, GameObservation
 
 
@@ -16,7 +16,6 @@ from flip7.players.base import BasePlayer, GameObservation
 import random as _random
 
 _last_round_narrated = 0  # shared sentinel so only the first player prints the header
-
 
 class NarratingRandomPlayer(BasePlayer):
     """Hits or stays randomly; prints its decision."""
@@ -36,11 +35,6 @@ class NarratingRandomPlayer(BasePlayer):
             _last_round_narrated = obs.round_number
             print(f"\n  ── Round {obs.round_number} ──")
 
-        prev_obs = self._prev_obs
-        same_round = prev_obs is not None and obs.round_number == prev_obs.round_number
-        if not self.quiet and self._prev_decision == HitStay.HIT and same_round and prev_obs is not None:
-            self._narrate_hit_result(prev_obs, obs)
-
         choice = self._rng.choice([HitStay.HIT, HitStay.STAY])
         if not self.quiet:
             cards = _format_number_cards(obs.my_number_cards)
@@ -51,10 +45,14 @@ class NarratingRandomPlayer(BasePlayer):
         self._prev_decision = choice
         return choice
 
-    def _narrate_hit_result(self, prev: GameObservation, curr: GameObservation) -> None:
+    def on_hit_result(self, obs: GameObservation) -> None:
+        if self.quiet or self._prev_obs is None:
+            self._prev_obs = obs
+            return
+        prev = self._prev_obs
         prev_nums = {c.value for c in prev.my_number_cards}
-        new_nums = [c for c in curr.my_number_cards if c.value not in prev_nums]
-        new_mods = curr.my_modifier_cards[len(prev.my_modifier_cards):]
+        new_nums = [c for c in obs.my_number_cards if c.value not in prev_nums]
+        new_mods = obs.my_modifier_cards[len(prev.my_modifier_cards):]
 
         if new_nums:
             for c in new_nums:
@@ -64,6 +62,7 @@ class NarratingRandomPlayer(BasePlayer):
                 print(f"      ← P{self.player_id} drew {_card_str(m)}")
         else:
             print(f"      ← P{self.player_id} drew action card")
+        self._prev_obs = obs
 
     def choose_target(self, action_card: ActionCard, obs: GameObservation) -> int:
         active = [p.player_id for p in obs.other_players
@@ -144,11 +143,6 @@ def narrate_diff(prev: GameState, curr: GameState) -> list[str]:
     prev_rs = prev.round_state
     curr_rs = curr.round_state
     if prev_rs is None or curr_rs is None:
-        return lines
-
-    # Phase transition
-    if prev_rs.phase != curr_rs.phase:
-        lines.append(f"\n  ── {curr_rs.phase.upper()} PHASE ──")
         return lines
 
     # Per-player changes
@@ -237,32 +231,36 @@ def main():
     ]
 
     engine = GameEngine(num_players=args.players, seed=args.seed)
-    log = engine.play_game(players)
+    state, deck = engine.new_game()
+    discard: list = []
+    prev_state = state
 
-    # Narrate the log
-    for i, curr in enumerate(log):
-        if i == 0:
-            continue
-        prev = log[i - 1]
+    while True:
+        state, deck, discard, round_log = engine.play_round(state, deck, discard, players)
 
-        # Round-end boundary: cumulative scores just updated
-        if curr.cumulative_scores != prev.cumulative_scores:
-            for line in narrate_round_end(prev, curr):
-                print(line)
-            continue
+        # Narrate this round immediately after it finishes
+        combined = [prev_state] + round_log
+        for i in range(1, len(combined)):
+            p, c = combined[i - 1], combined[i]
+            if c.cumulative_scores != p.cumulative_scores:
+                for line in narrate_round_end(p, c):
+                    print(line)
+            else:
+                for line in narrate_diff(p, c):
+                    print(line)
 
-        for line in narrate_diff(prev, curr):
-            print(line)
+        prev_state = state
+
+        if max(state.cumulative_scores) >= WIN_SCORE:
+            break
 
     # Final result
-    final = log[-1]
-    winner = max(range(args.players), key=lambda i: final.cumulative_scores[i])
+    winner = max(range(args.players), key=lambda i: state.cumulative_scores[i])
     print(f"{'═'*60}")
-    print(f"  GAME OVER after {final.round_number} round(s)")
-    print(f"  Final scores: {dict(enumerate(final.cumulative_scores))}")
-    print(f"  Winner: P{winner} with {final.cumulative_scores[winner]} points")
+    print(f"  GAME OVER after {state.round_number} round(s)")
+    print(f"  Final scores: {dict(enumerate(state.cumulative_scores))}")
+    print(f"  Winner: P{winner} with {state.cumulative_scores[winner]} points")
     print(f"{'═'*60}")
-    print(f"\n  Total game state snapshots logged: {len(log)}")
 
 
 if __name__ == "__main__":

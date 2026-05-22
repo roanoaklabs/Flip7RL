@@ -1,0 +1,67 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+wheels/
+.eggs/
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# Type checkers
+.mypy_cache/
+.pytype/
+.pyre/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Distribution / packaging
+*.spec
+pip-wheel-metadata/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ML / RL artifacts
+runs/
+checkpoints/
+models/
+*.pt
+*.pth
+*.ckpt
+wandb/
+mlruns/
+
+# Logs & output
+*.log
+logs/
+results/
+outputs/

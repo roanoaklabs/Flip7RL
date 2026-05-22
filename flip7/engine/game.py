@@ -195,6 +195,7 @@ class GameEngine:
                     state, deck, discard, pid, players
                 )
                 log.extend(card_log)
+                players[pid].on_hit_result(self._make_observation(state, pid))
 
         return state, deck, discard, log
 

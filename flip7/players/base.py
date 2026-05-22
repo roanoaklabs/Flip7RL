@@ -36,6 +36,9 @@ class BasePlayer(ABC):
     def choose_target(self, action_card: ActionCard, observation: GameObservation) -> int:
         """Return player_id to target with action card."""
 
+    def on_hit_result(self, observation: GameObservation) -> None:
+        """Called immediately after a HIT is resolved with the updated observation."""
+
 
 class AlwaysHitPlayer(BasePlayer):
     """Simple player that always hits. Used for testing."""
