@@ -23,6 +23,7 @@ class PlayerRoundState:
     modifier_cards: tuple  # tuple[ModifierCard, ...]
     action_cards: tuple  # tuple[ActionCard, ...] - held action cards (SecondChance)
     status: PlayerStatus
+    bust_card_value: Optional[int] = None  # value of the duplicate card that caused a bust
 
     def current_sum(self) -> int:
         """Compute score: sum numbers, apply x2, add +N, add 15 if flip7."""

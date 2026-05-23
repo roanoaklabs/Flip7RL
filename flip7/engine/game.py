@@ -149,6 +149,9 @@ class GameEngine:
             pstate = state.round_state.player_states[pid]
             if pstate.status in (PlayerStatus.FROZEN, PlayerStatus.BUSTED, PlayerStatus.STAYED):
                 continue
+            # Skip players who already received cards via FLIP_THREE during this deal phase
+            if pstate.number_cards or pstate.modifier_cards or pstate.action_cards:
+                continue
             state, deck, discard, card_log = self._deal_card_to_player(state, deck, discard, pid, players)
             log.extend(card_log)
             if self._is_round_over(state):
@@ -257,7 +260,7 @@ class GameEngine:
                     discard.append(card)  # discard the duplicate
                     log.append(state)
                 else:
-                    state = self._apply_bust(state, player_id)
+                    state = self._apply_bust(state, player_id, card.value)
                     discard.append(card)
                     log.append(state)
             else:
@@ -390,6 +393,12 @@ class GameEngine:
                 discard.append(card)
                 continue
 
+            # Discard if the acting player is no longer active (e.g. frozen after card was queued)
+            acting_pstate = state.round_state.player_states[acting_player_id]
+            if acting_pstate.status != PlayerStatus.ACTIVE:
+                discard.append(card)
+                continue
+
             # Ask acting player to choose target
             obs = self._make_observation(state, acting_player_id)
             players[acting_player_id].observe(obs)
@@ -497,7 +506,7 @@ class GameEngine:
         )
         return self._update_player(state, player_id, new_pstate)
 
-    def _apply_bust(self, state: GameState, player_id: int) -> GameState:
+    def _apply_bust(self, state: GameState, player_id: int, bust_card_value: int | None = None) -> GameState:
         """Mark player as busted."""
         pstate = state.round_state.player_states[player_id]
         new_pstate = PlayerRoundState(
@@ -506,6 +515,7 @@ class GameEngine:
             modifier_cards=pstate.modifier_cards,
             action_cards=pstate.action_cards,
             status=PlayerStatus.BUSTED,
+            bust_card_value=bust_card_value,
         )
         return self._update_player(state, player_id, new_pstate)
 

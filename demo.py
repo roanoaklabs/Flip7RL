@@ -65,6 +65,10 @@ class NarratingRandomPlayer(BasePlayer):
         self._prev_obs = obs
 
     def choose_target(self, action_card: ActionCard, obs: GameObservation) -> int:
+        global _last_round_narrated
+        if not self.quiet and obs.round_number != _last_round_narrated:
+            _last_round_narrated = obs.round_number
+            print(f"\n  ── Round {obs.round_number} ──")
         active = [p.player_id for p in obs.other_players
                   if p.status == PlayerStatus.ACTIVE]
         if not active:
@@ -145,6 +149,42 @@ def narrate_diff(prev: GameState, curr: GameState) -> list[str]:
     if prev_rs is None or curr_rs is None:
         return lines
 
+    is_deal = curr_rs.phase == "deal"
+
+    # Queue change: card added (action card drawn and queued)
+    if len(curr_rs.action_queue) > len(prev_rs.action_queue):
+        added = curr_rs.action_queue[len(prev_rs.action_queue):]
+        for card, actor in added:
+            if is_deal:
+                lines.append(f"  P{actor} dealt {_card_str(card)}")
+            else:
+                lines.append(f"  ↳ {_card_str(card)} queued by P{actor}")
+
+    # Queue change: card removed (action card resolved — infer target from same-diff changes)
+    if len(curr_rs.action_queue) < len(prev_rs.action_queue):
+        removed = prev_rs.action_queue[:len(prev_rs.action_queue) - len(curr_rs.action_queue)]
+        for card, actor in removed:
+            target_str = ""
+            if card.type == ActionType.FLIP_THREE:
+                targets = [
+                    pid for pid in range(curr.num_players)
+                    if (set(c.value for c in curr_rs.player_states[pid].number_cards) !=
+                        set(c.value for c in prev_rs.player_states[pid].number_cards))
+                    or (prev_rs.player_states[pid].status != PlayerStatus.BUSTED and
+                        curr_rs.player_states[pid].status == PlayerStatus.BUSTED)
+                ]
+                if targets:
+                    target_str = f" → P{targets[0]}"
+            elif card.type == ActionType.FREEZE:
+                frozen = [
+                    pid for pid in range(curr.num_players)
+                    if (prev_rs.player_states[pid].status != PlayerStatus.FROZEN and
+                        curr_rs.player_states[pid].status == PlayerStatus.FROZEN)
+                ]
+                if frozen:
+                    target_str = f" → P{frozen[0]}"
+            lines.append(f"  ↳ P{actor} applies {_card_str(card)}{target_str}:")
+
     # Per-player changes
     for pid in range(curr.num_players):
         prev_p = prev_rs.player_states[pid]
@@ -155,7 +195,15 @@ def narrate_diff(prev: GameState, curr: GameState) -> list[str]:
             icon = _status_icon(curr_p.status)
             score = curr_p.current_sum()
             if curr_p.status == PlayerStatus.BUSTED:
-                lines.append(f"  {icon} P{pid} BUSTED  (score this round: 0)")
+                if curr_p.bust_card_value is not None:
+                    hand_had = _format_number_cards(curr_p.number_cards)
+                    verb = "dealt" if is_deal else "drew"
+                    lines.append(
+                        f"  {icon} P{pid} {verb} #{curr_p.bust_card_value}"
+                        f" — duplicate! (had {hand_had}) → BUSTED  (score this round: 0)"
+                    )
+                else:
+                    lines.append(f"  {icon} P{pid} BUSTED  (score this round: 0)")
             elif curr_p.status == PlayerStatus.STAYED:
                 lines.append(f"  {icon} P{pid} STAYED  (round score: {score})")
             elif curr_p.status == PlayerStatus.FROZEN:
@@ -167,7 +215,8 @@ def narrate_diff(prev: GameState, curr: GameState) -> list[str]:
             hand = _format_number_cards(curr_p.number_cards)
             mods = _format_modifier_cards(curr_p.modifier_cards)
             hand_str = f"{hand}{(' + ' + mods) if mods else ''}"
-            lines.append(f"  P{pid} drew #{v}  → hand {hand_str}  sum={curr_p.current_sum()}")
+            verb = "dealt" if is_deal else "drew"
+            lines.append(f"  P{pid} {verb} #{v}  → hand {hand_str}  sum={curr_p.current_sum()}")
             if curr_p.has_flip7():
                 lines.append(f"  ★ P{pid} FLIP 7! +15 bonus  round score={curr_p.current_sum()}")
 
@@ -176,24 +225,19 @@ def narrate_diff(prev: GameState, curr: GameState) -> list[str]:
         if new_mods > 0:
             added = curr_p.modifier_cards[len(prev_p.modifier_cards):]
             for m in added:
-                lines.append(f"  P{pid} drew {_card_str(m)}  sum={curr_p.current_sum()}")
+                verb = "dealt" if is_deal else "drew"
+                lines.append(f"  P{pid} {verb} {_card_str(m)}  sum={curr_p.current_sum()}")
 
-        # New action card held
+        # New action card held (Second Chance given to player)
         new_acs = len(curr_p.action_cards) - len(prev_p.action_cards)
         if new_acs > 0:
             added = curr_p.action_cards[len(prev_p.action_cards):]
             for a in added:
                 lines.append(f"  P{pid} received {_card_str(a)}")
 
-        # Lost an action card (Second Chance used or end-of-round discard)
+        # Lost an action card (Second Chance used)
         if len(curr_p.action_cards) < len(prev_p.action_cards):
             lines.append(f"  P{pid} used SECOND_CHANCE  (saved from bust)")
-
-    # Queue change: something was added
-    if len(curr_rs.action_queue) > len(prev_rs.action_queue):
-        added = curr_rs.action_queue[len(prev_rs.action_queue):]
-        for card, actor in added:
-            lines.append(f"  ↳ {_card_str(card)} queued by P{actor}")
 
     return lines
 
