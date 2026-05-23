@@ -2,6 +2,7 @@
 Demo: play one seeded game between 3 random players and narrate every event.
 Run with:  python3 demo.py
            python3 demo.py --seed 99 --players 4 --quiet
+           python3 demo.py --no-gui   (text-only narration)
 """
 import argparse
 import sys
@@ -264,7 +265,23 @@ def main():
     parser.add_argument("--seed",    type=int, default=42)
     parser.add_argument("--players", type=int, default=3)
     parser.add_argument("--quiet",   action="store_true", help="suppress hit/stay prints")
+    parser.add_argument("--no-gui",  action="store_false", dest="visual", help="disable pygame replay viewer")
     args = parser.parse_args()
+
+    if args.visual:
+        from flip7.players.base import RandomPlayer
+        from flip7.simulation.runner import run_game
+        from flip7.ui import replay_game
+        players = [RandomPlayer(i, seed=args.seed + i) for i in range(args.players)]
+        result  = run_game(players, seed=args.seed, full_log=True)
+        winner  = result.winner_id
+        print(f"Game finished — P{winner} wins  "
+              f"({result.num_rounds} rounds, {result.num_states} states recorded)")
+        assert result.log is not None
+        player_names = [type(p).__name__ for p in players]
+        replay_game(result.log, title=f"Flip 7 — seed={args.seed} players={args.players}",
+                    player_names=player_names)
+        return
 
     print(f"Flip 7 demo  seed={args.seed}  players={args.players}")
     print(f"First to 200 wins.\n")

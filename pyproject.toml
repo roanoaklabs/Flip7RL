@@ -10,6 +10,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-cov"]
+ui  = ["pygame>=2.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

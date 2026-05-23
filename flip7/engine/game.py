@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from ..players.base import BasePlayer, GameObservation
 
 WIN_SCORE = 200
+MAX_ROUNDS = 500  # safety limit — prevents infinite loops when number cards are exhausted
 
 
 class GameEngine:
@@ -38,7 +39,11 @@ class GameEngine:
         return state, deck
 
     def play_game(self, players: list) -> list[GameState]:
-        """Play a full game, return log of all GameState snapshots."""
+        """Play a full game, return log of all GameState snapshots.
+
+        Terminates when any player reaches WIN_SCORE or after MAX_ROUNDS rounds
+        (safety limit for degenerate states where number cards are exhausted).
+        """
         state, deck = self.new_game()
         discard: list[BaseCard] = []
         log: list[GameState] = [state]
@@ -49,8 +54,10 @@ class GameEngine:
             )
             log.extend(round_log)
 
-            # Check win condition after round ends
             if max(state.cumulative_scores) >= WIN_SCORE:
+                break
+
+            if state.round_number >= MAX_ROUNDS:
                 break
 
         return log

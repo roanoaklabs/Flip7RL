@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Optional
-from ..engine.cards import ActionCard
+from ..engine.cards import ActionCard, ModifierOp
 from ..engine.state import GameState, PlayerStatus, HitStay
 
 
@@ -18,6 +18,26 @@ class GameObservation:
     round_number: int
     num_players: int
     deck_remaining: int    # approximate count only
+
+    def my_current_sum(self) -> int:
+        """Score of my held cards: number sum → x2 → +N → Flip7 bonus."""
+        num_sum = sum(c.value for c in self.my_number_cards)
+        for m in self.my_modifier_cards:
+            if m.op == ModifierOp.MULTIPLY:
+                num_sum *= m.value
+        for m in self.my_modifier_cards:
+            if m.op == ModifierOp.ADD:
+                num_sum += m.value
+        if len(self.my_number_cards) == 7:
+            num_sum += 15
+        return num_sum
+
+    def my_unique_card_count(self) -> int:
+        """Number of unique number cards held (all held number cards are unique)."""
+        return len(self.my_number_cards)
+
+    def my_cumulative_score(self) -> int:
+        return self.cumulative_scores[self.my_player_id]
 
 
 class BasePlayer(ABC):
