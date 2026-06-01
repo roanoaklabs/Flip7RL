@@ -1,8 +1,9 @@
 """
-Demo: play one seeded game between 3 random players and narrate every event.
+Demo: play one seeded game and narrate every event.
 Run with:  python3 demo.py
            python3 demo.py --seed 99 --players 4 --quiet
            python3 demo.py --no-gui   (text-only narration)
+           python3 demo.py --types random heuristic heuristic
 """
 import argparse
 import sys
@@ -10,6 +11,7 @@ from flip7.engine.cards import NumberCard, ModifierCard, ActionCard, ModifierOp,
 from flip7.engine.state import GameState, PlayerStatus, HitStay
 from flip7.engine.game import GameEngine, WIN_SCORE
 from flip7.players.base import BasePlayer, GameObservation
+from flip7.players.heuristic import HeuristicPlayer
 
 
 # ── Verbose random player ──────────────────────────────────────────────────────
@@ -75,6 +77,58 @@ class NarratingRandomPlayer(BasePlayer):
         if not active:
             return self.player_id
         target = self._rng.choice(active)
+        if not self.quiet:
+            print(f"      ↳ P{self.player_id} plays {_card_str(action_card)} → P{target}")
+        return target
+
+
+# ── Narrating heuristic player ────────────────────────────────────────────────
+
+class NarratingHeuristicPlayer(HeuristicPlayer):
+    """HeuristicPlayer that prints its decisions like NarratingRandomPlayer."""
+    def __init__(self, player_id: int, quiet: bool = False):
+        super().__init__(player_id)
+        self.quiet = quiet
+        self._prev_obs: GameObservation | None = None
+
+    def decide(self, obs: GameObservation) -> HitStay:
+        global _last_round_narrated
+        if not self.quiet and obs.round_number != _last_round_narrated:
+            _last_round_narrated = obs.round_number
+            print(f"\n  ── Round {obs.round_number} ──")
+        choice = super().decide(obs)
+        if not self.quiet:
+            cards = _format_number_cards(obs.my_number_cards)
+            mods  = _format_modifier_cards(obs.my_modifier_cards)
+            hand  = f"{cards}{(' + ' + mods) if mods else ''}"
+            print(f"    P{self.player_id} [{hand}] sum={_sum(obs)} → {choice.value.upper()}")
+        self._prev_obs = obs
+        return choice
+
+    def on_hit_result(self, obs: GameObservation) -> None:
+        if self.quiet or self._prev_obs is None:
+            self._prev_obs = obs
+            return
+        prev = self._prev_obs
+        prev_nums = {c.value for c in prev.my_number_cards}
+        new_nums = [c for c in obs.my_number_cards if c.value not in prev_nums]
+        new_mods = obs.my_modifier_cards[len(prev.my_modifier_cards):]
+        if new_nums:
+            for c in new_nums:
+                print(f"      ← P{self.player_id} drew #{c.value}")
+        elif new_mods:
+            for m in new_mods:
+                print(f"      ← P{self.player_id} drew {_card_str(m)}")
+        else:
+            print(f"      ← P{self.player_id} drew action card")
+        self._prev_obs = obs
+
+    def choose_target(self, action_card: ActionCard, obs: GameObservation) -> int:
+        global _last_round_narrated
+        if not self.quiet and obs.round_number != _last_round_narrated:
+            _last_round_narrated = obs.round_number
+            print(f"\n  ── Round {obs.round_number} ──")
+        target = super().choose_target(action_card, obs)
         if not self.quiet:
             print(f"      ↳ P{self.player_id} plays {_card_str(action_card)} → P{target}")
         return target
@@ -260,36 +314,69 @@ def narrate_round_end(prev: GameState, curr: GameState) -> list[str]:
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
+_PLAYER_TYPES = ["random", "heuristic"]
+# Future hook: add "human" to _PLAYER_TYPES and handle it in _make_player below.
+
+
+def _make_player(player_type: str, player_id: int, seed: int, quiet: bool) -> BasePlayer:
+    if player_type == "random":
+        return NarratingRandomPlayer(player_id, seed=seed, quiet=quiet)
+    if player_type == "heuristic":
+        return NarratingHeuristicPlayer(player_id, quiet=quiet)
+    # Future hook: elif player_type == "human": return HumanPlayer(player_id)
+    raise ValueError(f"Unknown player type: {player_type!r}")
+
+
+def _random_player_types(n: int, rng: _random.Random) -> list[str]:
+    """Pick a random mix of random/heuristic players with at least one of each (when n >= 2)."""
+    types = [_random.choice(_PLAYER_TYPES) for _ in range(n)]
+    if n >= 2 and len(set(types)) == 1:
+        swap = rng.randrange(n)
+        types[swap] = next(t for t in _PLAYER_TYPES if t != types[swap])
+    return types
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--seed",    type=int, default=42)
+    parser.add_argument("--seed",    type=int, default=None)
     parser.add_argument("--players", type=int, default=3)
+    parser.add_argument("--types",   nargs="*", choices=_PLAYER_TYPES,
+                        help="player types (e.g. --types random heuristic heuristic); "
+                             "defaults to a random mix")
     parser.add_argument("--quiet",   action="store_true", help="suppress hit/stay prints")
     parser.add_argument("--no-gui",  action="store_false", dest="visual", help="disable pygame replay viewer")
     args = parser.parse_args()
 
+    if args.seed is None:
+        args.seed = _random.randrange(2**32)
+
+    rng = _random.Random(args.seed)
+
+    if args.types:
+        player_types = args.types
+        args.players = len(player_types)
+    else:
+        player_types = _random_player_types(args.players, rng)
+
     if args.visual:
-        from flip7.players.base import RandomPlayer
         from flip7.simulation.runner import run_game
         from flip7.ui import replay_game
-        players = [RandomPlayer(i, seed=args.seed + i) for i in range(args.players)]
+        players = [_make_player(t, i, args.seed + i, quiet=True) for i, t in enumerate(player_types)]
         result  = run_game(players, seed=args.seed, full_log=True)
         winner  = result.winner_id
         print(f"Game finished — P{winner} wins  "
               f"({result.num_rounds} rounds, {result.num_states} states recorded)")
         assert result.log is not None
-        player_names = [type(p).__name__ for p in players]
+        player_names = [f"P{i}({t})" for i, t in enumerate(player_types)]
         replay_game(result.log, title=f"Flip 7 — seed={args.seed} players={args.players}",
                     player_names=player_names)
         return
 
     print(f"Flip 7 demo  seed={args.seed}  players={args.players}")
+    print(f"Types: {', '.join(f'P{i}={t}' for i, t in enumerate(player_types))}")
     print(f"First to 200 wins.\n")
 
-    players = [
-        NarratingRandomPlayer(i, seed=args.seed + i, quiet=args.quiet)
-        for i in range(args.players)
-    ]
+    players = [_make_player(t, i, args.seed + i, quiet=args.quiet) for i, t in enumerate(player_types)]
 
     engine = GameEngine(num_players=args.players, seed=args.seed)
     state, deck = engine.new_game()

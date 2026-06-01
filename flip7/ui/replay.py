@@ -292,7 +292,7 @@ _STATUS_LABELS = {
 }
 
 
-def _draw_players(screen, fonts, state: GameState):
+def _draw_players(screen, fonts, state: GameState, player_names=None):
     rs   = state.round_state
     n    = state.num_players
     gap  = 8
@@ -518,6 +518,12 @@ def _describe_change(prev: GameState, curr: GameState) -> list[str]:
 
     verb = "dealt" if crs.phase == "deal" else "drew"
 
+    # Collect "plays" lines first so cause appears before effect (e.g. "P0 plays Freeze" → "P1 Frozen")
+    cause_lines: list[str] = []
+    if len(crs.action_queue) < len(prs.action_queue):
+        for card, actor in prs.action_queue[:len(prs.action_queue) - len(crs.action_queue)]:
+            cause_lines.append(f"P{actor} plays {card.type.value}")
+
     for pid in range(curr.num_players):
         pp, cp = prs.player_states[pid], crs.player_states[pid]
 
@@ -567,8 +573,4 @@ def _describe_change(prev: GameState, curr: GameState) -> list[str]:
             else:
                 lines.append(f"P{actor} drew {card.type.value} — queued")
 
-    if len(crs.action_queue) < len(prs.action_queue):
-        for card, actor in prs.action_queue[:len(prs.action_queue) - len(crs.action_queue)]:
-            lines.append(f"P{actor} plays {card.type.value}")
-
-    return lines or ["—"]
+    return (cause_lines + lines) or ["—"]
